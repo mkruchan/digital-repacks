@@ -7267,7 +7267,7 @@ function editTitle() {
     if (_renameId) {
       const sb = sbGetClient();
       if (sb) {
-        sb.from('offers').update({ name: newText, updated_at: new Date().toISOString() }).eq('id', _renameId).then(({ error }) => {
+        sb.from('offers_v2').update({ name: newText, updated_at: new Date().toISOString() }).eq('id', _renameId).then(({ error }) => {
           if (error) { console.error('Failed to rename offer:', error); showToast('Rename failed: ' + error.message, 'error'); }
           else {
             _allOffers = _allOffers.map(o => o.id === _renameId ? { ...o, name: newText } : o);
@@ -7846,9 +7846,9 @@ async function gridUploadMedia(input, rowIdx) {
       try {
         const ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         const path = `creatives/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
-        const { error: sbErr } = await sb.storage.from('creatives').upload(path, file, { contentType: file.type });
+        const { error: sbErr } = await sb.storage.from('creatives_v2').upload(path, file, { contentType: file.type });
         if (sbErr) throw sbErr;
-        const { data: { publicUrl } } = sb.storage.from('creatives').getPublicUrl(path);
+        const { data: { publicUrl } } = sb.storage.from('creatives_v2').getPublicUrl(path);
         const sbMediaTag = isVideo
           ? `<video class="media-thumb" src="${publicUrl}" onclick="openLightbox('${publicUrl}')" style="cursor:pointer" title="View" muted playsinline preload="metadata" controls></video>`
           : `<img class="media-thumb" src="${publicUrl}" onclick="openLightbox('${publicUrl}')" style="cursor:pointer" title="View">`;
@@ -8806,7 +8806,7 @@ function adpStartRenameOffer(el) {
     // Save to Supabase
     const offerId = _currentOfferId || localStorage.getItem('ecoverage_current_offer_id');
     if (offerId && typeof sb !== 'undefined') {
-      await sb.from('offers').update({ name: newName }).eq('id', offerId);
+      await sb.from('offers_v2').update({ name: newName }).eq('id', offerId);
       if (typeof offerRebuildSelect === 'function') offerRebuildSelect();
     }
     scheduleSave();
@@ -10092,11 +10092,11 @@ async function handleMediaUpload(input, previewId) {
         </div>`;
         const ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
         const path = `creatives/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
-        const { data: sbData, error: sbErr } = await sb.storage.from('creatives').upload(path, file, {
+        const { data: sbData, error: sbErr } = await sb.storage.from('creatives_v2').upload(path, file, {
           contentType: file.type, upsert: false
         });
         if (sbErr) throw sbErr;
-        const { data: { publicUrl } } = sb.storage.from('creatives').getPublicUrl(path);
+        const { data: { publicUrl } } = sb.storage.from('creatives_v2').getPublicUrl(path);
         const url = publicUrl;
         const thumbUrl = url; // No auto-thumbnail for Supabase, use full URL
         const sbHmMediaTag = isVideo
@@ -11071,7 +11071,7 @@ async function cloudHistorySave(data) {
   const sb = sbGetClient();
   if (!sb) return;
   try {
-    await sb.from('offer_history').insert({ offer_id: _currentOfferId, data });
+    await sb.from('offer_history_v2').insert({ offer_id: _currentOfferId, data });
   } catch(e) { console.warn('History save failed:', e); }
 }
 
@@ -11080,7 +11080,7 @@ async function cloudHistoryLoad() {
   const sb = sbGetClient();
   if (!sb) return;
   try {
-    const { data, error } = await sb.from('offer_history')
+    const { data, error } = await sb.from('offer_history_v2')
       .select('id,data,created_at')
       .eq('offer_id', _currentOfferId)
       .order('created_at', { ascending: false })
@@ -11638,7 +11638,7 @@ async function offerLoadAll() {
   if (window._loaderSetStatus) window._loaderSetStatus('Connecting...');
   if (!sb) { offerRebuildSelect(); if (window._loaderDone) window._loaderDone(); return; }
   if (window._loaderSetStatus) window._loaderSetStatus('Loading offers...');
-  const { data, error } = await sb.from('offers').select('id,name,updated_at,data->meta->date').order('updated_at', { ascending: false });
+  const { data, error } = await sb.from('offers_v2').select('id,name,updated_at,data->meta->date').order('updated_at', { ascending: false });
   if (error) { console.error('offerLoadAll:', error); showToast('Failed to load offers: ' + error.message, 'error'); return; }
   _allOffers = data || [];
 
@@ -11649,11 +11649,11 @@ async function offerLoadAll() {
     const title = (document.getElementById('main-title')?.dataset?.text || '').trim();
     if (title && title !== '—') {
       const pageData = collectData();
-      const { data: row, error: err } = await sb.from('offers').insert({ name: title, data: pageData }).select().single();
+      const { data: row, error: err } = await sb.from('offers_v2').insert({ name: title, data: pageData }).select().single();
       if (!err && row) {
         _currentOfferId = row.id;
         localStorage.setItem(SB_OFFER_KEY, row.id);
-        const { data: fresh } = await sb.from('offers').select('id,name,updated_at,data->meta->date').order('updated_at', { ascending: false });
+        const { data: fresh } = await sb.from('offers_v2').select('id,name,updated_at,data->meta->date').order('updated_at', { ascending: false });
         _allOffers = fresh || [];
         showToast('✅ First offer created: "' + title + '"', 'success');
       }
@@ -11705,7 +11705,7 @@ async function offerLoad(id, showMsg) {
   }
 
   // ── Step 2: Check if cache is stale (lightweight query) ──
-  const { data: meta } = await sb.from('offers').select('updated_at').eq('id', id).single();
+  const { data: meta } = await sb.from('offers_v2').select('updated_at').eq('id', id).single();
   const cacheTime = cached?.updated_at;
   const freshTime = meta?.updated_at;
 
@@ -11720,7 +11720,7 @@ async function offerLoad(id, showMsg) {
   }
 
   // ── Step 3: Cache is stale — fetch full data ──
-  const { data, error } = await sb.from('offers').select('*').eq('id', id).single();
+  const { data, error } = await sb.from('offers_v2').select('*').eq('id', id).single();
   if (error || !data) {
     if (!cached) showToast('Failed to load offer', 'error');
     _offerSwitching = false;
@@ -11913,7 +11913,7 @@ async function offerNewConfirm() {
     return;
   }
   const emptyData = { v: 2, header: { title: name, titleUrl: '' }, meta: {}, notes: {}, traffic: [], ads: [], funnels: [] };
-  const { data: row, error } = await sb.from('offers').insert({ name, data: emptyData }).select().single();
+  const { data: row, error } = await sb.from('offers_v2').insert({ name, data: emptyData }).select().single();
   if (error) { showToast('Create failed: ' + error.message, 'error'); return; }
   _currentOfferId = row.id;
   localStorage.setItem(SB_OFFER_KEY, row.id);
@@ -11930,7 +11930,7 @@ async function offerSaveCurrent() {
   if (!sb) { manualSave(); return; }
   if (!_currentOfferId) { offerNew(); return; }
   const pageData = collectData();
-  const { error } = await sb.from('offers').update({ data: pageData, updated_at: new Date().toISOString() }).eq('id', _currentOfferId);
+  const { error } = await sb.from('offers_v2').update({ data: pageData, updated_at: new Date().toISOString() }).eq('id', _currentOfferId);
   if (error) { showToast('Save failed: ' + error.message, 'error'); return; }
   const name = _allOffers.find(o => o.id === _currentOfferId)?.name || '';
   showToast('💾 Saved: ' + name, 'success');
@@ -11949,7 +11949,7 @@ function offerRename() {
   offerRebuildSelect();
   const sb = sbGetClient();
   if (!sb || !_currentOfferId) { showToast('Renamed to "' + name + '"', 'success'); return; }
-  sb.from('offers').update({ name }).eq('id', _currentOfferId).then(({ error }) => {
+  sb.from('offers_v2').update({ name }).eq('id', _currentOfferId).then(({ error }) => {
     if (error) { showToast('Rename failed in DB: ' + error.message, 'error'); return; }
     _allOffers = _allOffers.map(o => o.id === _currentOfferId ? { ...o, name } : o);
     offerRebuildSelect();
@@ -11991,7 +11991,7 @@ function offerRename() {
           return;
         }
         const savedAt = new Date().toISOString();
-        await sb.from('offers').update({ data: pageData, updated_at: savedAt }).eq('id', _currentOfferId);
+        await sb.from('offers_v2').update({ data: pageData, updated_at: savedAt }).eq('id', _currentOfferId);
         // Final check: if sequence changed while Supabase was writing, schedule one more save
         if (_saveSeq !== seqAtSaveStart) {
           console.log('[save] seq changed during write — scheduling follow-up save');
