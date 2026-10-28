@@ -11639,7 +11639,7 @@ async function offerLoadAll() {
   if (!sb) { offerRebuildSelect(); if (window._loaderDone) window._loaderDone(); return; }
   if (window._loaderSetStatus) window._loaderSetStatus('Loading offers...');
   const { data, error } = await sb.from('offers_v2').select('id,name,updated_at,data->meta->date').order('updated_at', { ascending: false });
-  if (error) { console.error('offerLoadAll:', error); showToast('Failed to load offers: ' + error.message, 'error'); return; }
+  if (error) { console.error('offerLoadAll:', error); if (String(error.code) !== '42501') showToast('Failed to load offers: ' + error.message, 'error'); return; }
   _allOffers = data || [];
 
   // If table empty AND no URL slug, auto-save current page as first offer
@@ -12491,6 +12491,75 @@ document.addEventListener('click', function(e) {
       target.dispatchEvent(new Event('input', { bubbles: true }));
     }
   }, true);
+</script>
+<!-- ── sign-in gate (2026-10-28): the reports are team-only in the database (creative-research-sites/supabase/47_other_apps_lock.sql):
+     a company account (point2web.com / liftiq.com, email code) reads, only the owner edits. Nothing loads before the sign-in. ── -->
+<style>
+  #cr-gate { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .55); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #cr-gate[hidden] { display: none; }
+  body.cr-gated { overflow: hidden; }
+  #cr-gate .gate-card { width: min(420px, 100%); border-radius: 18px; padding: 28px 26px; background: #fff; color: #0f172a; box-shadow: 0 24px 60px rgba(15, 23, 42, .28); display: flex; flex-direction: column; gap: 14px; text-align: center; }
+  #cr-gate h1 { font-size: 20px; margin: 0; } #cr-gate p { margin: 0; color: #475569; font-size: 14px; line-height: 1.5; }
+  #cr-gate form { display: flex; flex-direction: column; gap: 10px; }
+  #cr-gate input { height: 44px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 0 12px; font: inherit; font-size: 15px; color: #0f172a; background: #fff; }
+  #cr-gate button { height: 44px; border-radius: 10px; border: 0; background: #2563eb; color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  #cr-gate button.secondary { background: transparent; color: #475569; font-weight: 500; height: auto; padding: 4px; }
+  #cr-gate .gate-msg { font-size: 13px; color: #b91c1c; min-height: 1em; }
+</style>
+<div id="cr-gate" hidden role="dialog" aria-modal="true" aria-labelledby="gate-title">
+  <div class="gate-card">
+    <h1 id="gate-title">Digital Repacks</h1>
+    <p>Sign in with your company email to open the reports</p>
+    <form id="gate-form"><input id="gate-email" type="email" placeholder="you@point2web.com" required autocomplete="email"><button type="submit">Send code</button></form>
+    <form id="gate-verify" hidden><input id="gate-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" required><button type="submit">Sign in</button></form>
+    <p class="gate-msg" id="gate-msg" role="status" aria-live="polite"></p>
+    <button type="button" class="secondary" id="gate-out" hidden>Sign out</button>
+  </div>
+</div>
+<script>
+(function () {
+  const SB_URL = 'https://vdannnwpikfipdamphlu.supabase.co', SB_KEY = 'sb_publishable_0EgBovhUMdw7RH1qAPnxqA_BLvPVeHL';
+  const gate = document.getElementById('cr-gate'), $ = id => document.getElementById(id);
+  const msg = t => { $('gate-msg').textContent = t || ''; };
+  const show = t => { gate.hidden = false; document.body.classList.add('cr-gated'); msg(t); };
+  const hide = () => { gate.hidden = true; document.body.classList.remove('cr-gated'); };
+  function client() {
+    try { if (typeof sbGetClient === 'function') { const c = sbGetClient(); if (c) return c; } } catch (e) {}
+    try { localStorage.setItem('ecoverage_sb_url', SB_URL); localStorage.setItem('ecoverage_sb_key', SB_KEY); } catch (e) {}
+    try { if (typeof sbGetClient === 'function') { const c = sbGetClient(); if (c) return c; } } catch (e) {}
+    return (window.supabase && window.supabase.createClient) ? (window.__gateClient = window.__gateClient || window.supabase.createClient(SB_URL, SB_KEY)) : null;
+  }
+  async function check() {
+    let sb = client();
+    for (let t = 0; t < 50 && !(sb && sb.auth); t++) { await new Promise(r => setTimeout(r, 100)); sb = client(); }
+    if (!sb || !sb.auth) { show('Sign-in is not available right now. Reload the page.'); return; }
+    const { data } = await sb.auth.getSession();
+    if (!data || !data.session) { show(''); return; }
+    try {
+      const r = await sb.rpc('research_access');
+      if (r.data && r.data.viewer) { hide(); return; }
+      show('Signed in as ' + ((r.data && r.data.email) || 'this account') + ', which is not a team account. Use your point2web.com or liftiq.com email.');
+      $('gate-out').hidden = false;
+    } catch (e) { show('Could not check your access. Try again.'); }
+  }
+  let email = '';
+  $('gate-form').onsubmit = async e => {
+    e.preventDefault(); const sb = client(); email = $('gate-email').value.trim().toLowerCase(); if (!sb || !email) return;
+    msg('Sending the code…');
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+    if (error) { msg(error.message); return; }
+    $('gate-form').hidden = true; $('gate-verify').hidden = false; msg('Enter the 6-digit code from the email sent to ' + email + '.'); $('gate-code').focus();
+  };
+  $('gate-verify').onsubmit = async e => {
+    e.preventDefault(); const sb = client(); const token = $('gate-code').value.trim(); if (!sb || !token) return;
+    msg('Checking…');
+    const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
+    if (error) { msg(error.message); return; }
+    location.reload();
+  };
+  $('gate-out').onclick = async () => { const sb = client(); try { if (sb) await sb.auth.signOut(); } catch (e) {} location.reload(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check); else check();
+})();
 </script>
 </body>
 </html>
